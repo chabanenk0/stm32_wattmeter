@@ -21,7 +21,6 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,6 +45,91 @@ ADC_HandleTypeDef hadc2;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
+uint32_t dataAddress = 0x08001c00;
+
+static uint32_t readCurrentTimeFromFlash() 
+{
+  return *(__IO uint32_t *)dataAddress;
+}
+
+static int WriteToFlash(uint32_t t, uint32_t voltageRaw, uint32_t amperageRaw)
+{
+    if (t > 120*1024/4) {
+        return 333; // no memory to store data
+    }
+      /* Unlock the Flash to enable the flash control register access *************/
+       HAL_FLASH_Unlock();
+
+       /* Erase the user Flash area*/
+
+      uint32_t StartPageAddress = dataAddress + t*4;
+      //uint64_t dataToWrite = voltageRaw + (amperageRaw >> 16);
+
+      if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_HALFWORD, StartPageAddress, (uint64_t) voltageRaw) != HAL_OK) {
+          return HAL_FLASH_GetError ();
+      }
+
+      if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_HALFWORD, StartPageAddress + 2, (uint64_t) amperageRaw) != HAL_OK) {
+          return HAL_FLASH_GetError ();
+      }
+
+      /* Lock the Flash to disable the flash control register access (recommended
+          to protect the FLASH memory against possible unwanted operation) *********/
+      HAL_FLASH_Lock();
+
+      return 0;
+}
+
+static int eraseFlashMemory()
+{
+    static FLASH_EraseInitTypeDef EraseInitStruct;
+    uint32_t PAGEError;
+      uint32_t StartPage = dataAddress;
+      uint32_t EndPage = dataAddress + 120*1024 - 1;
+      HAL_FLASH_Unlock();
+
+       /* Fill EraseInit structure*/
+       EraseInitStruct.TypeErase   = FLASH_TYPEERASE_PAGES;
+       EraseInitStruct.PageAddress = StartPage;
+       EraseInitStruct.NbPages     = ((EndPage - StartPage)/FLASH_PAGE_SIZE) +1;
+
+       if (HAL_FLASHEx_Erase(&EraseInitStruct, &PAGEError) != HAL_OK)
+       {
+         /*Error occurred while page erase.*/
+          return HAL_FLASH_GetError ();
+       }
+       HAL_FLASH_Lock();
+
+      return 0;
+}
+
+static uint32_t searchForStartPosition()
+{
+  uint32_t currentValue;
+  uint32_t i = 0;
+  uint32_t firstEmptyPosition = 0;
+  int firstEmpty = 0;
+
+  while (i < 120*1024/4) 
+  {
+    currentValue = *(__IO uint32_t *)(dataAddress + i*4);
+    if (currentValue == 0xffffffffU) {
+        if (firstEmpty == 1) {
+            return firstEmptyPosition;
+        }
+
+        firstEmpty = 1;
+        firstEmptyPosition = i;
+    } else {
+        firstEmpty = 0;
+        firstEmptyPosition = 0;
+    }
+
+    i++;
+  }
+
+  return firstEmptyPosition;
+}
 
 /* USER CODE END PV */
 
@@ -71,6 +155,9 @@ static void MX_ADC2_Init(void);
 int main(void)
 {
   /* USER CODE BEGIN 1 */
+  uint32_t voltageRaw;
+  uint32_t amperageRaw;
+  //char buffer[300];
 
   /* USER CODE END 1 */
 
@@ -96,13 +183,54 @@ int main(void)
   MX_ADC1_Init();
   MX_ADC2_Init();
   /* USER CODE BEGIN 2 */
+  //eraseFlashMemory();
+  uint32_t t = searchForStartPosition();
 
+  GPIO_PinState state;
+  WriteToFlash(t, 0xfffe, 0xfffe); // marker of the recording start
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+         // Start ADC Conversion
+        HAL_ADC_Start(&hadc1);
+       // Poll ADC1 Perihperal & TimeOut = 1mSec
+        HAL_ADC_PollForConversion(&hadc1, 1);
+       // Read The ADC Conversion Result & Map It To PWM DutyCycle
+        amperageRaw = HAL_ADC_GetValue(&hadc1);
+        HAL_Delay(1);
+         // Start ADC Conversion
+        HAL_ADC_Start(&hadc2);
+       // Poll ADC1 Perihperal & TimeOut = 1mSec
+        HAL_ADC_PollForConversion(&hadc2, 1);
+       // Read The ADC Conversion Result & Map It To PWM DutyCycle
+        voltageRaw = HAL_ADC_GetValue(&hadc2);
+        
+    //sprintf(buffer, "Time: %d, voltage raw: %d, amperage raw: %d\n", (int) t, (int) voltageRaw, (int) amperageRaw);
+    //HAL_UART_Write(data);
+    if (WriteToFlash(t, voltageRaw, amperageRaw) == 333)
+    {
+      while(1) {// memory error indication
+        HAL_GPIO_WritePin(GPIOC,GPIO_PIN_13, GPIO_PIN_SET);
+        HAL_Delay(100);
+        HAL_GPIO_WritePin(GPIOC,GPIO_PIN_13, GPIO_PIN_RESET);
+        HAL_Delay(100);
+      }
+
+    }
+    t++;
+
+    if (voltageRaw > 4096/2) {
+      state = GPIO_PIN_SET;
+    } else {
+      state = GPIO_PIN_RESET;
+    }
+
+    HAL_GPIO_WritePin(GPIOC,GPIO_PIN_13, state);
+    HAL_Delay(2000);
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
