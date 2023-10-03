@@ -17,6 +17,9 @@
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <string.h>
 #include "main.h"
 #include "fatfs.h"
 
@@ -48,90 +51,106 @@ UART_HandleTypeDef huart1;
 PCD_HandleTypeDef hpcd_USB_FS;
 
 /* USER CODE BEGIN PV */
-uint32_t dataAddress = 0x08001c00;
 
-static uint32_t readCurrentTimeFromFlash() 
-{
-  return *(__IO uint32_t *)dataAddress;
+void UART_Printf(const char* fmt, ...) {
+    char buff[256];
+    va_list args;
+//    va_start(args, fmt);
+    vsnprintf(buff, sizeof(buff), fmt, args);
+    HAL_UART_Transmit(&huart1, (uint8_t*)buff, strlen(buff),
+                      HAL_MAX_DELAY);
+  //  va_end(args);
 }
-
-static int WriteToFlash(uint32_t t, uint32_t voltageRaw, uint32_t amperageRaw)
+static int WriteToFlash(uint32_t fileNumber, uint32_t voltageRaw, uint32_t amperageRaw)
 {
-    if (t > 120*1024/4) {
-        return 333; // no memory to store data
+   FIL outputFile;
+   FRESULT res;
+   char fileName[20];
+   sprintf(fileName, "%ld.dat", fileNumber);
+   res = f_open(&outputFile, fileName, FA_OPEN_ALWAYS | FA_WRITE);
+
+    if(res != FR_OK) {
+        UART_Printf("f_open() failed, res = %d\r\n", res);
+
+        return -1;
     }
-      /* Unlock the Flash to enable the flash control register access *************/
-       HAL_FLASH_Unlock();
 
-       /* Erase the user Flash area*/
+    res = f_lseek(&outputFile, outputFile.fsize);
+    if(res != FR_OK) {
+        UART_Printf("f_open() failed, res = %d\r\n", res);
 
-      uint32_t StartPageAddress = dataAddress + t*4;
-      //uint64_t dataToWrite = voltageRaw + (amperageRaw >> 16);
+        return -10;
+    }
 
-      if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_HALFWORD, StartPageAddress, (uint64_t) voltageRaw) != HAL_OK) {
-          return HAL_FLASH_GetError ();
-      }
 
-      if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_HALFWORD, StartPageAddress + 2, (uint64_t) amperageRaw) != HAL_OK) {
-          return HAL_FLASH_GetError ();
-      }
+    unsigned int bytesWritten;
+    res = f_write(&outputFile, &voltageRaw, 4, &bytesWritten);
+    if(res != FR_OK) {
+        UART_Printf("f_write() failed, res = %d\r\n", res);
 
-      /* Lock the Flash to disable the flash control register access (recommended
-          to protect the FLASH memory against possible unwanted operation) *********/
-      HAL_FLASH_Lock();
+        return -2;
+    }
 
-      return 0;
+    if(bytesWritten < 4) {
+        UART_Printf("WARNING! Disk is full, bytesToWrite = %lu, bytesWritten = %lu\r\n", 4, bytesWritten);
+
+        return 333;
+    }
+
+    res = f_write(&outputFile, &amperageRaw, 4, &bytesWritten);
+
+    if(res != FR_OK) {
+        UART_Printf("f_write() failed, res = %d\r\n", res);
+
+        return -3;
+    }
+
+    if(bytesWritten < 4) {
+        UART_Printf("WARNING! Disk is full, bytesToWrite = %lu, bytesWritten = %lu\r\n", 4, bytesWritten);
+
+        return 333;
+    }
+
+    res = f_close(&outputFile);
+
+    if(res != FR_OK) {
+        UART_Printf("f_close() failed, res = %d\r\n", res);
+        return -4;
+    }
+
+    return 0;
 }
 
-static int eraseFlashMemory()
+uint32_t getNextNonExistedFileName()
 {
-    static FLASH_EraseInitTypeDef EraseInitStruct;
-    uint32_t PAGEError;
-      uint32_t StartPage = dataAddress;
-      uint32_t EndPage = dataAddress + 120*1024 - 1;
-      HAL_FLASH_Unlock();
-
-       /* Fill EraseInit structure*/
-       EraseInitStruct.TypeErase   = FLASH_TYPEERASE_PAGES;
-       EraseInitStruct.PageAddress = StartPage;
-       EraseInitStruct.NbPages     = ((EndPage - StartPage)/FLASH_PAGE_SIZE) +1;
-
-       if (HAL_FLASHEx_Erase(&EraseInitStruct, &PAGEError) != HAL_OK)
-       {
-         /*Error occurred while page erase.*/
-          return HAL_FLASH_GetError ();
-       }
-       HAL_FLASH_Lock();
-
-      return 0;
-}
-
-static uint32_t searchForStartPosition()
-{
-  uint32_t currentValue;
   uint32_t i = 0;
-  uint32_t firstEmptyPosition = 0;
-  int firstEmpty = 0;
+  FATFS fs;
+  FRESULT res;
+  FIL outputFile;
+  char fileName[20];
 
-  while (i < 120*1024/4) 
-  {
-    currentValue = *(__IO uint32_t *)(dataAddress + i*4);
-    if (currentValue == 0xffffffffU) {
-        if (firstEmpty == 1) {
-            return firstEmptyPosition;
-        }
-
-        firstEmpty = 1;
-        firstEmptyPosition = i;
-    } else {
-        firstEmpty = 0;
-        firstEmptyPosition = 0;
+  res = f_mount(&fs, "", 0);
+  if (res == FR_NO_FILESYSTEM) {
+    f_mkfs("", 0, 0);
+  }
+    if(res != FR_OK) {
+        UART_Printf("f_mount() failed, res = %d\r\n", res);
+        return -1;
     }
 
-    i++;
-  }
+  do {
+   sprintf(fileName, "%ld.dat", i);
+   res = f_open(&outputFile, fileName, FA_OPEN_ALWAYS | FA_WRITE);
+    if(res != FR_OK) {
+      res = f_close(&outputFile);
 
-  return firstEmptyPosition;
+      return i;
+    }
+
+    f_close(&outputFile);
+  } while (res != FR_OK && i < 65000);
+
+  return -1;
 }
 
 /* USER CODE END PV */
@@ -190,10 +209,10 @@ int main(void)
   MX_USB_PCD_Init();
   /* USER CODE BEGIN 2 */
   //eraseFlashMemory();
-  uint32_t t = searchForStartPosition();
+  uint32_t fileNumber = getNextNonExistedFileName();
 
   GPIO_PinState state;
-  WriteToFlash(t, 0xfffe, 0xfffe); // marker of the recording start
+  WriteToFlash(fileNumber, 0xfffe, 0xfffe); // marker of the recording start
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -216,7 +235,7 @@ int main(void)
         
     //sprintf(buffer, "Time: %d, voltage raw: %d, amperage raw: %d\n", (int) t, (int) voltageRaw, (int) amperageRaw);
     //HAL_UART_Write(data);
-    if (WriteToFlash(t, voltageRaw, amperageRaw) == 333)
+    if (WriteToFlash(fileNumber, voltageRaw, amperageRaw) == 333)
     {
       while(1) {// memory error indication
         HAL_GPIO_WritePin(GPIOC,GPIO_PIN_13, GPIO_PIN_SET);
@@ -226,7 +245,6 @@ int main(void)
       }
 
     }
-    t++;
 
     if (voltageRaw > 4096/2) {
       state = GPIO_PIN_SET;
