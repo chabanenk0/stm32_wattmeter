@@ -181,7 +181,9 @@ int main(void)
   MX_GPIO_Init();
   MX_USART1_UART_Init();
   MX_ADC1_Init();
+  HAL_ADCEx_Calibration_Start(&hadc1);
   MX_ADC2_Init();
+  HAL_ADCEx_Calibration_Start(&hadc2);
   /* USER CODE BEGIN 2 */
   //eraseFlashMemory();
   uint32_t t = searchForStartPosition();
