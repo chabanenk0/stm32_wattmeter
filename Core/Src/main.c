@@ -21,6 +21,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
+#include "ssd1306.h"
+#include "ssd1306_fonts.h"
+#include "ssd1306_conf_template.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -133,6 +137,21 @@ static uint32_t searchForStartPosition()
   return firstEmptyPosition;
 }
 
+static uint32_t display_refresh(int voltage, int amperage, int time)
+{
+  char str[36];
+  sprintf(str, "voltage raw: %d", voltage);
+  ssd1306_SetCursor(2, 2 + 17);
+  ssd1306_WriteString(str, Font_16x24, White);
+
+  sprintf(str, "current raw: %d", amperage);
+  ssd1306_SetCursor(2, 2 + 17*2);
+  ssd1306_WriteString(str, Font_16x24, White);
+  sprintf(str, "time: %d", time);
+  ssd1306_SetCursor(2, 2 + 17*3);
+  ssd1306_WriteString(str, Font_16x24, White);
+}
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -192,6 +211,8 @@ int main(void)
 
   GPIO_PinState state;
   WriteToFlash(t, 0xfffe, 0xfffe); // marker of the recording start
+  ssd1306_Init();
+  display_refresh(0, 0, t);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -224,6 +245,9 @@ int main(void)
       }
 
     }
+
+    display_refresh(voltageRaw, amperageRaw, t);
+
     t++;
 
     if (voltageRaw > 4096/2) {
