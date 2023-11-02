@@ -51,7 +51,8 @@ I2C_HandleTypeDef hi2c1;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
-uint32_t dataAddress = 0x08001c00;
+//uint32_t dataAddress = 0x08001c00;// version without display
+uint32_t dataAddress = 0x08003a00; // with display
 
 static uint32_t readCurrentTimeFromFlash() 
 {
@@ -60,7 +61,7 @@ static uint32_t readCurrentTimeFromFlash()
 
 static int WriteToFlash(uint32_t t, uint32_t voltageRaw, uint32_t amperageRaw)
 {
-    if (t > 120*1024/4) {
+    if (t > 114*1024/4) {// 120 for the version without display, 114 with display
         return 333; // no memory to store data
     }
       /* Unlock the Flash to enable the flash control register access *************/
@@ -116,7 +117,7 @@ static uint32_t searchForStartPosition()
   uint32_t firstEmptyPosition = 0;
   int firstEmpty = 0;
 
-  while (i < 120*1024/4) 
+  while (i < 114*1024/4) 
   {
     currentValue = *(__IO uint32_t *)(dataAddress + i*4);
     if (currentValue == 0xffffffffU) {
@@ -141,15 +142,23 @@ static uint32_t display_refresh(int voltage, int amperage, int time)
 {
   char str[36];
   sprintf(str, "voltage raw: %d", voltage);
-  ssd1306_SetCursor(2, 2 + 17);
-  ssd1306_WriteString(str, Font_16x24, White);
+  ssd1306_SetCursor(2, 2 + 9);
+  ssd1306_WriteString(str, Font_7x10, White);
 
   sprintf(str, "current raw: %d", amperage);
-  ssd1306_SetCursor(2, 2 + 17*2);
-  ssd1306_WriteString(str, Font_16x24, White);
-  sprintf(str, "time: %d", time);
-  ssd1306_SetCursor(2, 2 + 17*3);
-  ssd1306_WriteString(str, Font_16x24, White);
+  ssd1306_SetCursor(2, 2 + 9*2);
+  ssd1306_WriteString(str, Font_7x10, White);
+  sprintf(str, "time: %d of %d", time, 29184); //114*1024/4
+  ssd1306_SetCursor(2, 2 + 9*3);
+  ssd1306_WriteString(str, Font_7x10, White);
+  sprintf(str, "Mariyka-porosiyka!");
+  ssd1306_SetCursor(2, 2 + 9*4);
+  ssd1306_WriteString(str, Font_7x10, White);
+  sprintf(str, "!!!ne chipay!!!", time);
+  ssd1306_SetCursor(2, 2 + 9*5);
+  ssd1306_WriteString(str, Font_7x10, White);
+
+  ssd1306_UpdateScreen();
 }
 
 /* USER CODE END PV */
